@@ -12,7 +12,7 @@ import (
 
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
 	"github.com/influxdata/influxdb-client-go/v2/api"
-	"github.com/jakobilobi/go-wsstat"
+	"github.com/relaytools/go-wsstat"
 	"github.com/spf13/viper"
 
 	"github.com/nbd-wtf/go-nostr"
