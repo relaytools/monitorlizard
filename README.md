@@ -7,5 +7,7 @@ It can publish the results to InfluxDB and to nostr relays using NIP66
 # Quick Setup
 ```
 cp example.monitorlizard.env .monitorlizard.env
+go build
+./monitorlizard wss://myrelay.com
 ```
 Edit the settings to match your needs.
