@@ -5,8 +5,8 @@ go 1.22.4
 require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/influxdata/influxdb-client-go/v2 v2.13.0
-	github.com/jakobilobi/go-wsstat v0.1.3-alpha
 	github.com/nbd-wtf/go-nostr v0.33.0
+	github.com/relaytools/go-wsstat v0.0.0-20240624222222-831694dc7443
 	github.com/spf13/viper v1.19.0
 )
 
@@ -52,5 +52,3 @@ require (
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/jakobilobi/go-wsstat => ../go-wsstat
