@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,15 +14,46 @@ import (
 	"github.com/influxdata/influxdb-client-go/v2/api"
 	"github.com/jakobilobi/go-wsstat"
 	"github.com/spf13/viper"
+
+	"github.com/nbd-wtf/go-nostr"
 )
 
-type influxdbConfig struct {
-	Url         string `mapstructure:"INFLUXDB_URL"`
-	Token       string `mapstructure:"INFLUXDB_TOKEN"`
-	Org         string `mapstructure:"INFLUXDB_ORG"`
-	Bucket      string `mapstructure:"INFLUXDB_BUCKET"`
-	Measurement string `mapstructure:"INFLUXDB_MEASUREMENT"`
+type MonitorConfig struct {
+	InfluxUrl         string `mapstructure:"INFLUXDB_URL"`
+	InfluxToken       string `mapstructure:"INFLUXDB_TOKEN"`
+	InfluxOrg         string `mapstructure:"INFLUXDB_ORG"`
+	InfluxBucket      string `mapstructure:"INFLUXDB_BUCKET"`
+	InfluxMeasurement string `mapstructure:"INFLUXDB_MEASUREMENT"`
 	MonitorName string `mapstructure:"MONITOR_NAME"`
+	MonitorFrequency int `mapstructure:"MONITOR_FREQUENCY"`
+	Publish bool `mapstructure:"NOSTR_PUBLISH"`
+	PrivateKey string `mapstructure:"NOSTR_PRIVATE_KEY"`
+	PublishRelayMetrics string `mapstructure:"NOSTR_PUBLISH_RELAY_METRICS"`
+	PublishMonitorProfile bool `mapstructure:"NOSTR_PUBLISH_MONITOR_PROFILE"`
+	MonitorCountryCode string `mapstructure:"MONITOR_COUNTRY_CODE"`
+	MonitorCountryName string `mapstructure:"MONITOR_COUNTRY_NAME"`
+	MonitorCityName string `mapstructure:"MONITOR_CITY_NAME"`
+	MonitorAbout string `mapstructure:"MONITOR_ABOUT"`
+	MonitorPicture string `mapstructure:"MONITOR_PICTURE"`
+}
+
+type NostrProfile struct {
+	Name    string `json:"name"`
+    About   string `json:"about"`
+    Picture string `json:"picture"`
+}
+
+func publishEv(ev nostr.Event, url string) (err error) {
+	relay, err := nostr.RelayConnect(context.Background(), url)
+	if err != nil {
+		return err
+	}
+
+	if err := relay.Publish(context.Background(), ev); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func main() {
@@ -34,22 +67,41 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to parse URL: %v", err)
 	}
-	// InfluxDB optional config loading
+	// Config loading
 	viper.AddConfigPath("/usr/local/etc")
 	viper.AddConfigPath("./")
 	viper.SetConfigName(".monitorlizard.env")
 	viper.SetConfigType("env")
-	influxEnabled := true
-	var iConfig *influxdbConfig
+
+	var iConfig *MonitorConfig
 	if err := viper.ReadInConfig(); err != nil {
-		fmt.Print("Warn: error reading influxdb config file /usr/local/etc/.monitorlizard.env\n", err)
-		influxEnabled = false
+		fmt.Println("Warn: error reading monitorlizard config file from current directory -or- /usr/local/etc/.monitorlizard.env\n", err)
+		os.Exit(1)
 	}
 	// Viper unmarshals the loaded env variables into the struct
 	if err := viper.Unmarshal(&iConfig); err != nil {
-		fmt.Print("Warn: unable to decode influxdb config into struct\n", err)
+		fmt.Print("Warn: unable to decode monitorlizard config into struct\n", err)
+		os.Exit(1)
+	}
+
+	influxEnabled := true
+	if iConfig.InfluxUrl == "" || iConfig.InfluxToken == "" || iConfig.InfluxOrg == "" || iConfig.InfluxBucket == "" || iConfig.InfluxMeasurement == "" {
+		fmt.Println("Warn: InfluxDB configuration missing, disabling InfluxDB")
 		influxEnabled = false
 	}
+
+	// Default to frequency 10 seconds
+	useFrequency := time.Second * 10
+	useFrequencySecondsString := "10"
+	if iConfig.MonitorFrequency != 0 {
+		useFrequency = time.Second * time.Duration(iConfig.MonitorFrequency)
+		useFrequencySecondsString = fmt.Sprintf("%d", iConfig.MonitorFrequency)
+		if err != nil {
+			fmt.Printf("Error: unable to parse duration %s\n", iConfig.MonitorFrequency)
+		}
+	}
+
+	pub, _ := nostr.GetPublicKey(iConfig.PrivateKey)
 
 	fmt.Printf("Info: influxdb: %t\n", influxEnabled)
 
@@ -58,30 +110,108 @@ func main() {
 
 	if influxEnabled {
 		// INFLUX INIT
-		client = influxdb2.NewClientWithOptions(iConfig.Url, iConfig.Token,
+		client = influxdb2.NewClientWithOptions(iConfig.InfluxUrl, iConfig.InfluxToken,
 			influxdb2.DefaultOptions().SetBatchSize(20))
 		// Get non-blocking write client
-		writeAPI = client.WriteAPI(iConfig.Org, iConfig.Bucket)
+		writeAPI = client.WriteAPI(iConfig.InfluxOrg, iConfig.InfluxBucket)
 	}
 
+	if iConfig.PublishMonitorProfile {
+		// Publish to Nostr
+		// use go-nostr to publish 3 events
+		// 10166 - Monitor Profile
+		ev := nostr.Event {
+			PubKey: pub,
+			CreatedAt: nostr.Timestamp(time.Now().Unix()), 
+			Kind: 10166,
+			Tags: nostr.Tags{
+				nostr.Tag{ "frequency", useFrequencySecondsString },
+				nostr.Tag{ "o", pub },
+				nostr.Tag{ "k", "30066" },
+				nostr.Tag{ "c", "read" },
+				nostr.Tag{ "timeout", "open", "5000" },
+				nostr.Tag{ "timeout", "read", "15000" },
+				nostr.Tag{ "timeout", "read", "15000" },
+				nostr.Tag{ "g", iConfig.MonitorCountryCode, "countryCode" },
+				nostr.Tag{ "g", iConfig.MonitorCountryName, "countryName" },
+				nostr.Tag{ "g", iConfig.MonitorCityName, "cityName" },
+			},
+			Content: "",
+		}
+		ev.Sign(iConfig.PrivateKey)
+		var err error
+		err = publishEv(ev, iConfig.PublishRelayMetrics)
+		if err != nil {
+			fmt.Printf("Error publishing kind 10166: %s\n", err)
+		} else {
+			fmt.Printf("published monitor profile to %s\n", url)
+		}
+
+		// 10002 - Monitor Relay List
+		relayListEv := nostr.Event {
+			PubKey: pub,
+			CreatedAt: nostr.Timestamp(time.Now().Unix()), 
+			Kind: 10002,
+			Tags: nostr.Tags{
+				nostr.Tag{ "r", iConfig.PublishRelayMetrics, "write" },
+			},
+			Content: "",
+		}
+		relayListEv.Sign(iConfig.PrivateKey)
+		err = publishEv(relayListEv, iConfig.PublishRelayMetrics)
+		if err != nil {
+			fmt.Printf("Error publishing kind 10002: %s\n", err)
+		} else {
+			fmt.Printf("published monitor relayList 10002 to %s\n", url)
+		}
+
+		// 0 - Monitor Profile
+		newProfile := NostrProfile {
+			Name: iConfig.MonitorName,
+			About: iConfig.MonitorAbout,
+			Picture: iConfig.MonitorPicture,
+		}
+
+		newProfileJson, err := json.Marshal(newProfile)
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		profileEv := nostr.Event {
+			PubKey: pub,
+			CreatedAt: nostr.Timestamp(time.Now().Unix()),
+			Kind: 0,
+			Tags: nostr.Tags{},
+			Content: string(newProfileJson),
+		}
+
+		profileEv.Sign(iConfig.PrivateKey)
+
+		err = publishEv(profileEv, iConfig.PublishRelayMetrics)
+		if err != nil {
+			fmt.Printf("Error publishing kind 0: %s\n", err)
+		} else {
+			fmt.Printf("published monitor profile to %s\n", url)
+		}
+	}
+
+	ticker := time.NewTicker(useFrequency)
+	go func() {
+		ctx := context.Background()
+		for t := range ticker.C {
+			msg := "[\"REQ\", \"1234abcdping\", {\"kinds\": [1], \"limit\": 1}]"
+			whatTime := time.Now()
+			result, _, err := wsstat.MeasureLatency(url, msg, http.Header{})
+			if err != nil {
+				fmt.Println("ERROR OCCURRED: ", err)
+			}
+
+			fmt.Printf("Collecting data for %s at %s. total latency %dms\n", url, t, result.TotalTime.Milliseconds())
 
 
-	if influxEnabled {
-		ticker := time.NewTicker(10 * time.Second)
-
-		go func() {
-			for t := range ticker.C {
-
-				msg := "[\"REQ\", \"1234abcdping\", {\"kinds\": [1], \"limit\": 1}]"
-				result, _, err := wsstat.MeasureLatency(url, msg, http.Header{})
-				if err != nil {
-					fmt.Println("ERROR OCCURRED: ", err)
-				}
-
-				fmt.Printf("Collecting data for %s at %s. total latency %dms\n", url, t, result.TotalTime.Milliseconds())
-
+			if influxEnabled {
 				point := influxdb2.NewPoint(
-					iConfig.Measurement,
+					iConfig.InfluxMeasurement,
 					map[string]string{
 						"relay": url.Hostname(),
 						"monitor": iConfig.MonitorName,
@@ -94,16 +224,46 @@ func main() {
 						"wsrtt": result.MessageRoundTrip.Milliseconds(),
 						"totaltime": result.TotalTime.Milliseconds(),
 					},
-					time.Now())
+					whatTime,
+				)
 				// write asynchronously
 				writeAPI.WritePoint(point)
 			}
-		}()
-		select {}
-	} else {
-		msg := "[\"REQ\", \"1234abcdping\", {\"kinds\": [1], \"limit\": 1}]"
-		result, p, _ := wsstat.MeasureLatency(url, msg, http.Header{})
-		fmt.Printf("%+v\n", result)
-		fmt.Printf("Response: %s\n\n", p)
-	}
+
+			openConnMs := result.DNSLookup.Milliseconds() + result.TCPConnection.Milliseconds() + result.TLSHandshake.Milliseconds() + result.WSHandshake.Milliseconds()
+			openConnString := fmt.Sprintf("%d", openConnMs)
+			openConnReadString := fmt.Sprintf("%d", result.MessageRoundTrip.Milliseconds())
+			if iConfig.Publish {
+				// Publish to Nostr
+				// use go-nostr to publish an event
+				ev := nostr.Event {
+					PubKey: pub,
+					CreatedAt: nostr.Timestamp(whatTime.Unix()), 
+					Kind: 30066,
+					Tags: nostr.Tags{
+						nostr.Tag{ "d", url.String() },
+						nostr.Tag{ "other", "network", "clearnet" },
+						nostr.Tag{"rtt", "open", openConnString },
+						nostr.Tag{"rtt", "read", openConnReadString },
+					},
+					Content: "",
+				}
+				ev.Sign(iConfig.PrivateKey)
+				for _, url := range []string{iConfig.PublishRelayMetrics} {
+					relay, err := nostr.RelayConnect(ctx, url)
+					if err != nil {
+						fmt.Println(err)
+						continue
+					}
+					if err := relay.Publish(ctx, ev); err != nil {
+						fmt.Println(err)
+						continue
+					}
+
+					fmt.Printf("published monitor event to %s\n", url)
+				}
+			}
+		}
+	}()
+	select {}
 }
