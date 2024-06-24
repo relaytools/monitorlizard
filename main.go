@@ -43,14 +43,24 @@ type NostrProfile struct {
     Picture string `json:"picture"`
 }
 
-func publishEv(ev nostr.Event, url string) (err error) {
-	relay, err := nostr.RelayConnect(context.Background(), url)
-	if err != nil {
-		return err
-	}
+func publishEv(ev nostr.Event, urls []string) (err error) {
+	isError := false
+	var lastError error
+	lastError = nil
+	for _, url := range urls {
+		relay, err := nostr.RelayConnect(context.Background(), url)
+		if err != nil {
+			isError = true
+			lastError = err
+		}
 
-	if err := relay.Publish(context.Background(), ev); err != nil {
-		return err
+		if err := relay.Publish(context.Background(), ev); err != nil {
+			isError = true
+			lastError = err
+		}
+	}
+	if isError {
+		return lastError
 	}
 
 	return nil
@@ -73,6 +83,7 @@ func main() {
 	viper.SetConfigName(".monitorlizard.env")
 	viper.SetConfigType("env")
 
+
 	var iConfig *MonitorConfig
 	if err := viper.ReadInConfig(); err != nil {
 		fmt.Println("Warn: error reading monitorlizard config file from current directory -or- /usr/local/etc/.monitorlizard.env\n", err)
@@ -83,6 +94,8 @@ func main() {
 		fmt.Print("Warn: unable to decode monitorlizard config into struct\n", err)
 		os.Exit(1)
 	}
+
+	publishRelays := viper.GetStringSlice("NOSTR_PUBLISH_RELAY_METRICS")
 
 	influxEnabled := true
 	if iConfig.InfluxUrl == "" || iConfig.InfluxToken == "" || iConfig.InfluxOrg == "" || iConfig.InfluxBucket == "" || iConfig.InfluxMeasurement == "" {
@@ -140,11 +153,11 @@ func main() {
 		}
 		ev.Sign(iConfig.PrivateKey)
 		var err error
-		err = publishEv(ev, iConfig.PublishRelayMetrics)
+		err = publishEv(ev, publishRelays)
 		if err != nil {
 			fmt.Printf("Error publishing kind 10166: %s\n", err)
 		} else {
-			fmt.Printf("published monitor profile to %s\n", url)
+			fmt.Printf("published monitor profile to %v\n", publishRelays)
 		}
 
 		// 10002 - Monitor Relay List
@@ -158,11 +171,11 @@ func main() {
 			Content: "",
 		}
 		relayListEv.Sign(iConfig.PrivateKey)
-		err = publishEv(relayListEv, iConfig.PublishRelayMetrics)
+		err = publishEv(relayListEv, publishRelays)
 		if err != nil {
 			fmt.Printf("Error publishing kind 10002: %s\n", err)
 		} else {
-			fmt.Printf("published monitor relayList 10002 to %s\n", url)
+			fmt.Printf("published monitor relayList 10002 to %v\n", publishRelays)
 		}
 
 		// 0 - Monitor Profile
@@ -187,17 +200,16 @@ func main() {
 
 		profileEv.Sign(iConfig.PrivateKey)
 
-		err = publishEv(profileEv, iConfig.PublishRelayMetrics)
+		err = publishEv(profileEv, publishRelays)
 		if err != nil {
 			fmt.Printf("Error publishing kind 0: %s\n", err)
 		} else {
-			fmt.Printf("published monitor profile to %s\n", url)
+			fmt.Printf("published monitor profile to %v\n", publishRelays)
 		}
 	}
 
 	ticker := time.NewTicker(useFrequency)
 	go func() {
-		ctx := context.Background()
 		for t := range ticker.C {
 			msg := "[\"REQ\", \"1234abcdping\", {\"kinds\": [1], \"limit\": 1}]"
 			whatTime := time.Now()
@@ -249,19 +261,7 @@ func main() {
 					Content: "",
 				}
 				ev.Sign(iConfig.PrivateKey)
-				for _, url := range []string{iConfig.PublishRelayMetrics} {
-					relay, err := nostr.RelayConnect(ctx, url)
-					if err != nil {
-						fmt.Println(err)
-						continue
-					}
-					if err := relay.Publish(ctx, ev); err != nil {
-						fmt.Println(err)
-						continue
-					}
-
-					fmt.Printf("published monitor event to %s\n", url)
-				}
+				publishEv(ev, publishRelays)
 			}
 		}
 	}()
