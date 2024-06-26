@@ -63,19 +63,9 @@ func publishEv(ev nostr.Event, urls []string) (err error) {
 			lastError = err
 		}
 	}
-
-	/*
-	<-ctx.Done()
-
-	if err := ctx.Err(); err != nil {
-		fmt.Printf("Context cancelled by timeout for %s: %s\n", urls, err)
-	}
-	*/
-
 	if isError {
 		return lastError
 	}
-
 	return nil
 }
 
@@ -95,7 +85,6 @@ func main() {
 	viper.AddConfigPath("./")
 	viper.SetConfigName(".monitorlizard.env")
 	viper.SetConfigType("env")
-
 
 	var iConfig *MonitorConfig
 	if err := viper.ReadInConfig(); err != nil {
@@ -216,7 +205,6 @@ func main() {
 
 	if iConfig.PublishMonitorProfile {
 		// Publish to Nostr
-		// use go-nostr to publish 3 events
 		// 10166 - Monitor Profile
 		ev := nostr.Event {
 			PubKey: pub,
@@ -331,8 +319,7 @@ func main() {
 			openConnString := fmt.Sprintf("%d", openConnMs)
 			openConnReadString := fmt.Sprintf("%d", result.MessageRoundTrip.Milliseconds())
 			if iConfig.Publish {
-				// Publish to Nostr
-				// use go-nostr to publish an event
+				// Publish to Nostr stats kind:30066
 				ev := nostr.Event {
 					PubKey: pub,
 					CreatedAt: nostr.Timestamp(whatTime.Unix()), 
