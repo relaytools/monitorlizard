@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
@@ -48,18 +49,29 @@ func publishEv(ev nostr.Event, urls []string) (err error) {
 	isError := false
 	var lastError error
 	lastError = nil
+	ctx := context.Background()
 	for _, url := range urls {
-		relay, err := nostr.RelayConnect(context.Background(), url)
+		fmt.Println("publishing to -> ", url)
+		relay, err := nostr.RelayConnect(ctx, url)
 		if err != nil {
 			isError = true
 			lastError = err
 		}
 
-		if err := relay.Publish(context.Background(), ev); err != nil {
+		if err := relay.Publish(ctx, ev); err != nil {
 			isError = true
 			lastError = err
 		}
 	}
+
+	/*
+	<-ctx.Done()
+
+	if err := ctx.Err(); err != nil {
+		fmt.Printf("Context cancelled by timeout for %s: %s\n", urls, err)
+	}
+	*/
+
 	if isError {
 		return lastError
 	}
@@ -96,7 +108,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	publishRelays := viper.GetStringSlice("NOSTR_PUBLISH_RELAY_METRICS")
+	// if a comma is detected in the iConfig.PublishRelayMetrics, split it into a slice
+	publishRelays := []string{iConfig.PublishRelayMetrics}
+	if iConfig.PublishRelayMetrics != "" && strings.Contains(iConfig.PublishRelayMetrics, ",") {
+		publishRelays = strings.Split(iConfig.PublishRelayMetrics, ",")
+	}
+
+	fmt.Printf("Publishing to %d relays: %v\n", len(publishRelays), publishRelays)
 
 	influxEnabled := true
 	if iConfig.InfluxUrl == "" || iConfig.InfluxToken == "" || iConfig.InfluxOrg == "" || iConfig.InfluxBucket == "" || iConfig.InfluxMeasurement == "" {
@@ -168,13 +186,13 @@ func main() {
 
 		// Todo:
 
-		// stuff in the spec:
+		// stuff in the spec nip11:
 		// restricted writes? that's new..
 		// accepted kinds?
 		// language tags?
 		// general tags? what are these, they're new
 
-		// stuff not yet in the spec:
+		// stuff not yet in the spec nip11:
 		// fees?
 		// other stuff we might want, description?
 
