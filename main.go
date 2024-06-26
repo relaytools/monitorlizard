@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/nbd-wtf/go-nostr/nip11"
 )
 
 type MonitorConfig struct {
@@ -129,6 +130,72 @@ func main() {
 		writeAPI = client.WriteAPI(iConfig.InfluxOrg, iConfig.InfluxBucket)
 	}
 
+	// fetch NIP11 document
+	nip11Info, err := nip11.Fetch(context.Background(), rawUrl)
+	gotNip11 := true
+	if err != nil {
+		fmt.Printf("Error fetching NIP11 document: %s\n", err)
+		gotNip11 = false
+	}
+
+	if gotNip11 {
+		//fmt.Printf("NIP11 document: %s\n", nip11Info)
+		//os.Exit(0)
+		theseTags := nostr.Tags{}
+
+		for _, t := range nip11Info.SupportedNIPs {
+			theseTags = theseTags.AppendUnique(nostr.Tag{"N", fmt.Sprintf("%d", t)})
+		}
+
+		if nip11Info.Limitation.PaymentRequired {
+			theseTags = theseTags.AppendUnique(nostr.Tag{"R", "payment"})
+		} else {
+			theseTags = theseTags.AppendUnique(nostr.Tag{"R", "!payment"})
+		}
+
+		if nip11Info.Limitation.AuthRequired {
+			theseTags = theseTags.AppendUnique(nostr.Tag{"R", "auth"})
+		} else {
+			theseTags = theseTags.AppendUnique(nostr.Tag{"R", "!auth"})
+		}
+
+		// relay_countries (it's in nip11, could be used for geotags)
+		if len(nip11Info.RelayCountries) > 0 {
+			for _, c := range nip11Info.RelayCountries {
+				theseTags = theseTags.AppendUnique(nostr.Tag{"G", c})
+			}
+		}
+
+		// Todo:
+
+		// stuff in the spec:
+		// restricted writes? that's new..
+		// accepted kinds?
+		// language tags?
+		// general tags? what are these, they're new
+
+		// stuff not yet in the spec:
+		// fees?
+		// other stuff we might want, description?
+
+		fmt.Printf("tags were %v\n", theseTags)
+
+		nip11Ev := nostr.Event {
+			PubKey: pub,
+			CreatedAt: nostr.Timestamp(time.Now().Unix()), 
+			Kind: 30166,
+			Tags: theseTags,
+		}
+
+		nip11Ev.Sign(iConfig.PrivateKey)
+		err := publishEv(nip11Ev, publishRelays)
+		if err != nil {
+			fmt.Printf("Error publishing kind 30166: %s\n", err)
+		} else {
+			fmt.Printf("published relay registration for %s kind:30166 to %v\n", rawUrl, publishRelays)
+		}
+	}
+
 	if iConfig.PublishMonitorProfile {
 		// Publish to Nostr
 		// use go-nostr to publish 3 events
@@ -158,7 +225,7 @@ func main() {
 		if err != nil {
 			fmt.Printf("Error publishing kind 10166: %s\n", err)
 		} else {
-			fmt.Printf("published monitor profile to %v\n", publishRelays)
+			fmt.Printf("published monitor registration profile kind:10166 to %v\n", publishRelays)
 		}
 
 		// 10002 - Monitor Relay List
@@ -176,7 +243,7 @@ func main() {
 		if err != nil {
 			fmt.Printf("Error publishing kind 10002: %s\n", err)
 		} else {
-			fmt.Printf("published monitor relayList 10002 to %v\n", publishRelays)
+			fmt.Printf("published monitor relayList kind:10002 to %v\n", publishRelays)
 		}
 
 		// 0 - Monitor Profile
@@ -205,7 +272,7 @@ func main() {
 		if err != nil {
 			fmt.Printf("Error publishing kind 0: %s\n", err)
 		} else {
-			fmt.Printf("published monitor profile to %v\n", publishRelays)
+			fmt.Printf("published monitor profile kind:0 to %v\n", publishRelays)
 		}
 	}
 
@@ -220,7 +287,6 @@ func main() {
 			}
 
 			fmt.Printf("Collecting data for %s at %s. total latency %dms\n", url, t, result.TotalTime.Milliseconds())
-
 
 			if influxEnabled {
 				point := influxdb2.NewPoint(
