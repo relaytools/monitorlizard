@@ -173,17 +173,27 @@ func main() {
 			}
 		}
 
+		// general tags
+		if len(nip11Info.Tags) > 0 {
+			for _, t := range nip11Info.Tags {
+				theseTags = theseTags.AppendUnique(nostr.Tag{"t", t})
+			}
+		}
+
 		// Todo:
 
-		// stuff in the spec nip11:
-		// restricted writes? that's new..
-		// accepted kinds?
-		// language tags?
-		// general tags? what are these, they're new
+		// other stuff we might want to add to nip66 from nip11
+		//// really want these 
+		// description
+		// icon
+		// payments_url
+		// posting_policy
 
-		// stuff not yet in the spec nip11:
-		// fees?
-		// other stuff we might want, description?
+		//// don't need these but maybe
+		// accepted kinds?
+		// fees? probably don't need this
+		// restricted writes? that's new..
+		// language tags?
 
 		fmt.Printf("tags were %v\n", theseTags)
 

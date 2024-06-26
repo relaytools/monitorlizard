@@ -3,7 +3,6 @@ module github.com/relaytools/monitorlizard
 go 1.22.4
 
 require (
-	github.com/gorilla/websocket v1.5.3
 	github.com/influxdata/influxdb-client-go/v2 v2.13.0
 	github.com/nbd-wtf/go-nostr v0.33.0
 	github.com/relaytools/go-wsstat v0.0.0-20240624222222-831694dc7443
@@ -21,6 +20,7 @@ require (
 	github.com/gobwas/pool v0.2.1 // indirect
 	github.com/gobwas/ws v1.2.0 // indirect
 	github.com/google/uuid v1.4.0 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/influxdata/line-protocol v0.0.0-20200327222509-2487e7298839 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
