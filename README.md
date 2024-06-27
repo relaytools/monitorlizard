@@ -5,7 +5,7 @@ This is a monitoring agent that can monitor websocket latency to nostr relays.
 It can publish the results to InfluxDB and to nostr relays using NIP66
 
 # Pre-built binaries 
-Download the latest relase from the [releases page](github.com/relaytools/monitorlizard/releases)
+Download the latest relase from the [releases page](https://github.com/relaytools/monitorlizard/releases)
 
 Create an env file named .monitorlizard.env in the current directory.
 Example contents of .monitorlizard.env:
