@@ -62,6 +62,8 @@ func publishEv(ev nostr.Event, urls []string) (err error) {
 			isError = true
 			lastError = err
 		}
+
+		relay.Close()
 	}
 	if isError {
 		return lastError
