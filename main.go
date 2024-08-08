@@ -18,31 +18,37 @@ import (
 
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/nip11"
+
+	"github.com/mmcloughlin/geohash"
 )
 
 type MonitorConfig struct {
-	InfluxUrl         string `mapstructure:"INFLUXDB_URL"`
-	InfluxToken       string `mapstructure:"INFLUXDB_TOKEN"`
-	InfluxOrg         string `mapstructure:"INFLUXDB_ORG"`
-	InfluxBucket      string `mapstructure:"INFLUXDB_BUCKET"`
-	InfluxMeasurement string `mapstructure:"INFLUXDB_MEASUREMENT"`
-	MonitorName string `mapstructure:"MONITOR_NAME"`
-	MonitorFrequency int `mapstructure:"MONITOR_FREQUENCY"`
-	Publish bool `mapstructure:"NOSTR_PUBLISH"`
-	PrivateKey string `mapstructure:"NOSTR_PRIVATE_KEY"`
-	PublishRelayMetrics string `mapstructure:"NOSTR_PUBLISH_RELAY_METRICS"`
-	PublishMonitorProfile bool `mapstructure:"NOSTR_PUBLISH_MONITOR_PROFILE"`
-	MonitorCountryCode string `mapstructure:"MONITOR_COUNTRY_CODE"`
-	MonitorCountryName string `mapstructure:"MONITOR_COUNTRY_NAME"`
-	MonitorCityName string `mapstructure:"MONITOR_CITY_NAME"`
-	MonitorAbout string `mapstructure:"MONITOR_ABOUT"`
-	MonitorPicture string `mapstructure:"MONITOR_PICTURE"`
+	InfluxUrl             string  `mapstructure:"INFLUXDB_URL"`
+	InfluxToken           string  `mapstructure:"INFLUXDB_TOKEN"`
+	InfluxOrg             string  `mapstructure:"INFLUXDB_ORG"`
+	InfluxBucket          string  `mapstructure:"INFLUXDB_BUCKET"`
+	InfluxMeasurement     string  `mapstructure:"INFLUXDB_MEASUREMENT"`
+	MonitorName           string  `mapstructure:"MONITOR_NAME"`
+	MonitorFrequency      int     `mapstructure:"MONITOR_FREQUENCY"`
+	Publish               bool    `mapstructure:"NOSTR_PUBLISH"`
+	PrivateKey            string  `mapstructure:"NOSTR_PRIVATE_KEY"`
+	PublishRelayMetrics   string  `mapstructure:"NOSTR_PUBLISH_RELAY_METRICS"`
+	PublishMonitorProfile bool    `mapstructure:"NOSTR_PUBLISH_MONITOR_PROFILE"`
+	MonitorCountryCode    string  `mapstructure:"MONITOR_COUNTRY_CODE"`
+	MonitorLatitude       float64 `mapstructure:"MONITOR_LATITUDE"`
+	MonitorLongitude      float64 `mapstructure:"MONITOR_LONGITUDE"`
+	MonitorAbout          string  `mapstructure:"MONITOR_ABOUT"`
+	MonitorPicture        string  `mapstructure:"MONITOR_PICTURE"`
+
+	RelayUrl       string  `mapstructure:"RELAY_URL"`
+	RelayLatitude  float64 `mapstructure:"RELAY_LATITUDE"`
+	RelayLongitude float64 `mapstructure:"RELAY_LONGITUDE"`
 }
 
 type NostrProfile struct {
 	Name    string `json:"name"`
-    About   string `json:"about"`
-    Picture string `json:"picture"`
+	About   string `json:"about"`
+	Picture string `json:"picture"`
 }
 
 func publishEv(ev nostr.Event, urls []string) (err error) {
@@ -76,7 +82,7 @@ func main() {
 	if len(args) < 2 {
 		log.Fatalf("Usage: go run main.go URL")
 	}
-    rawUrl := args[1]
+	rawUrl := args[1]
 
 	url, err := url.Parse(rawUrl)
 	if err != nil {
@@ -130,6 +136,7 @@ func main() {
 
 	var client influxdb2.Client
 	var writeAPI api.WriteAPI
+	theseTags := nostr.Tags{}
 
 	if influxEnabled {
 		// INFLUX INIT
@@ -137,6 +144,89 @@ func main() {
 			influxdb2.DefaultOptions().SetBatchSize(20))
 		// Get non-blocking write client
 		writeAPI = client.WriteAPI(iConfig.InfluxOrg, iConfig.InfluxBucket)
+	}
+
+	if iConfig.PublishMonitorProfile {
+		// 0 - Monitor Profile
+		newProfile := NostrProfile{
+			Name:    iConfig.MonitorName,
+			About:   iConfig.MonitorAbout,
+			Picture: iConfig.MonitorPicture,
+		}
+
+		var err error
+		newProfileJson, err := json.Marshal(newProfile)
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		profileEv := nostr.Event{
+			PubKey:    pub,
+			CreatedAt: nostr.Timestamp(time.Now().Unix()),
+			Kind:      0,
+			Tags:      nostr.Tags{},
+			Content:   string(newProfileJson),
+		}
+
+		profileEv.Sign(iConfig.PrivateKey)
+
+		err = publishEv(profileEv, publishRelays)
+		if err != nil {
+			fmt.Printf("Error publishing kind 0: %s\n", err)
+		} else {
+			fmt.Printf("published monitor profile kind:0 to %v\n", publishRelays)
+		}
+
+		// 10002 - Monitor Relay List
+		relayListEv := nostr.Event{
+			PubKey:    pub,
+			CreatedAt: nostr.Timestamp(time.Now().Unix()),
+			Kind:      10002,
+			Tags: nostr.Tags{
+				nostr.Tag{"r", iConfig.PublishRelayMetrics, "write"},
+			},
+			Content: "",
+		}
+		relayListEv.Sign(iConfig.PrivateKey)
+		err = publishEv(relayListEv, publishRelays)
+		if err != nil {
+			fmt.Printf("Error publishing kind 10002: %s\n", err)
+		} else {
+			fmt.Printf("published monitor relayList kind:10002 to %v\n", publishRelays)
+		}
+
+		monitorGeo := geohash.EncodeWithPrecision(iConfig.MonitorLatitude, iConfig.MonitorLongitude, 9)
+		fmt.Println("monitor geohash was: ", monitorGeo)
+
+		// Publish to Nostr
+		// 10166 - Monitor Profile
+		ev := nostr.Event{
+			PubKey:    pub,
+			CreatedAt: nostr.Timestamp(time.Now().Unix()),
+			Kind:      10166,
+			Tags: nostr.Tags{
+
+				nostr.Tag{"url"},
+				nostr.Tag{"frequency", useFrequencySecondsString},
+				nostr.Tag{"o", pub},
+				nostr.Tag{"k", "30066"},
+				nostr.Tag{"c", "open"},
+				nostr.Tag{"c", "read"},
+				nostr.Tag{"timeout", "5000", "open"},
+				nostr.Tag{"timeout", "15000", "read"},
+				nostr.Tag{"timeout", "15000", "write"},
+				nostr.Tag{"G", iConfig.MonitorCountryCode, "countryCode"},
+				nostr.Tag{"g", monitorGeo},
+			},
+			Content: "",
+		}
+		ev.Sign(iConfig.PrivateKey)
+		err = publishEv(ev, publishRelays)
+		if err != nil {
+			fmt.Printf("Error publishing kind 10166: %s\n", err)
+		} else {
+			fmt.Printf("published monitor registration profile kind:10166 to %v\n", publishRelays)
+		}
 	}
 
 	// fetch NIP11 document
@@ -148,10 +238,6 @@ func main() {
 	}
 
 	if gotNip11 {
-		//fmt.Printf("NIP11 document: %s\n", nip11Info)
-		//os.Exit(0)
-		theseTags := nostr.Tags{}
-
 		for _, t := range nip11Info.SupportedNIPs {
 			theseTags = theseTags.AppendUnique(nostr.Tag{"N", fmt.Sprintf("%d", t)})
 		}
@@ -182,14 +268,9 @@ func main() {
 			}
 		}
 
-		// Todo:
+		theseTags = theseTags.AppendUnique(nostr.Tag{"d", url.String()})
 
-		// other stuff we might want to add to nip66 from nip11
-		//// really want these 
-		// description
-		// icon
-		// payments_url
-		// posting_policy
+		// Todo:
 
 		//// don't need these but maybe
 		// accepted kinds?
@@ -197,103 +278,7 @@ func main() {
 		// restricted writes? that's new..
 		// language tags?
 
-		fmt.Printf("tags were %v\n", theseTags)
-
-		nip11Ev := nostr.Event {
-			PubKey: pub,
-			CreatedAt: nostr.Timestamp(time.Now().Unix()), 
-			Kind: 30166,
-			Tags: theseTags,
-		}
-
-		nip11Ev.Sign(iConfig.PrivateKey)
-		err := publishEv(nip11Ev, publishRelays)
-		if err != nil {
-			fmt.Printf("Error publishing kind 30166: %s\n", err)
-		} else {
-			fmt.Printf("published relay registration for %s kind:30166 to %v\n", rawUrl, publishRelays)
-		}
 	}
-
-	if iConfig.PublishMonitorProfile {
-		// Publish to Nostr
-		// 10166 - Monitor Profile
-		ev := nostr.Event {
-			PubKey: pub,
-			CreatedAt: nostr.Timestamp(time.Now().Unix()), 
-			Kind: 10166,
-			Tags: nostr.Tags{
-				nostr.Tag{ "frequency", useFrequencySecondsString },
-				nostr.Tag{ "o", pub },
-				nostr.Tag{ "k", "30066" },
-				nostr.Tag{ "c", "open" },
-				nostr.Tag{ "c", "read" },
-				nostr.Tag{ "timeout", "open", "5000" },
-				nostr.Tag{ "timeout", "read", "15000" },
-				nostr.Tag{ "timeout", "write", "15000" },
-				nostr.Tag{ "G", iConfig.MonitorCountryCode, "countryCode" },
-				//nostr.Tag{ "G", iConfig.MonitorCountryName, "countryName" },
-				//nostr.Tag{ "G", iConfig.MonitorCityName, "cityName" },
-			},
-			Content: "",
-		}
-		ev.Sign(iConfig.PrivateKey)
-		var err error
-		err = publishEv(ev, publishRelays)
-		if err != nil {
-			fmt.Printf("Error publishing kind 10166: %s\n", err)
-		} else {
-			fmt.Printf("published monitor registration profile kind:10166 to %v\n", publishRelays)
-		}
-
-		// 10002 - Monitor Relay List
-		relayListEv := nostr.Event {
-			PubKey: pub,
-			CreatedAt: nostr.Timestamp(time.Now().Unix()), 
-			Kind: 10002,
-			Tags: nostr.Tags{
-				nostr.Tag{ "r", iConfig.PublishRelayMetrics, "write" },
-			},
-			Content: "",
-		}
-		relayListEv.Sign(iConfig.PrivateKey)
-		err = publishEv(relayListEv, publishRelays)
-		if err != nil {
-			fmt.Printf("Error publishing kind 10002: %s\n", err)
-		} else {
-			fmt.Printf("published monitor relayList kind:10002 to %v\n", publishRelays)
-		}
-
-		// 0 - Monitor Profile
-		newProfile := NostrProfile {
-			Name: iConfig.MonitorName,
-			About: iConfig.MonitorAbout,
-			Picture: iConfig.MonitorPicture,
-		}
-
-		newProfileJson, err := json.Marshal(newProfile)
-		if err != nil {
-			fmt.Println(err)
-		}
-
-		profileEv := nostr.Event {
-			PubKey: pub,
-			CreatedAt: nostr.Timestamp(time.Now().Unix()),
-			Kind: 0,
-			Tags: nostr.Tags{},
-			Content: string(newProfileJson),
-		}
-
-		profileEv.Sign(iConfig.PrivateKey)
-
-		err = publishEv(profileEv, publishRelays)
-		if err != nil {
-			fmt.Printf("Error publishing kind 0: %s\n", err)
-		} else {
-			fmt.Printf("published monitor profile kind:0 to %v\n", publishRelays)
-		}
-	}
-
 	ticker := time.NewTicker(useFrequency)
 	go func() {
 		for t := range ticker.C {
@@ -310,16 +295,16 @@ func main() {
 				point := influxdb2.NewPoint(
 					iConfig.InfluxMeasurement,
 					map[string]string{
-						"relay": url.Hostname(),
+						"relay":   url.Hostname(),
 						"monitor": iConfig.MonitorName,
 					},
 					map[string]interface{}{
-						"dnslookup": result.DNSLookup.Milliseconds(),
+						"dnslookup":     result.DNSLookup.Milliseconds(),
 						"tcpconnection": result.TCPConnection.Milliseconds(),
-						"tlshandshake": result.TLSHandshake.Milliseconds(),
-						"wshandshake": result.WSHandshake.Milliseconds(),
-						"wsrtt": result.MessageRoundTrip.Milliseconds(),
-						"totaltime": result.TotalTime.Milliseconds(),
+						"tlshandshake":  result.TLSHandshake.Milliseconds(),
+						"wshandshake":   result.WSHandshake.Milliseconds(),
+						"wsrtt":         result.MessageRoundTrip.Milliseconds(),
+						"totaltime":     result.TotalTime.Milliseconds(),
 					},
 					whatTime,
 				)
@@ -330,19 +315,27 @@ func main() {
 			openConnMs := result.DNSLookup.Milliseconds() + result.TCPConnection.Milliseconds() + result.TLSHandshake.Milliseconds() + result.WSHandshake.Milliseconds()
 			openConnString := fmt.Sprintf("%d", openConnMs)
 			openConnReadString := fmt.Sprintf("%d", result.MessageRoundTrip.Milliseconds())
+
+			newTags := nostr.Tags{}
+			for _, t := range theseTags {
+				newTags = newTags.AppendUnique(t)
+			}
+
+			fmt.Printf("tags were %v\n", theseTags)
+			newTags = newTags.AppendUnique(nostr.Tag{"d", url.String()})
+			newTags = newTags.AppendUnique(nostr.Tag{"g", geohash.EncodeWithPrecision(iConfig.RelayLatitude, iConfig.RelayLongitude, 9)})
+			newTags = newTags.AppendUnique(nostr.Tag{"rtt-open", openConnString})
+			newTags = newTags.AppendUnique(nostr.Tag{"rtt-read", openConnReadString})
+			newTags = newTags.AppendUnique(nostr.Tag{"other", "network", "clearnet"})
+			fmt.Println("newTags: ", newTags)
 			if iConfig.Publish {
-				// Publish to Nostr stats kind:30066
-				ev := nostr.Event {
-					PubKey: pub,
-					CreatedAt: nostr.Timestamp(whatTime.Unix()), 
-					Kind: 30066,
-					Tags: nostr.Tags{
-						nostr.Tag{ "d", url.String() },
-						nostr.Tag{ "other", "network", "clearnet" },
-						nostr.Tag{"rtt", "open", openConnString },
-						nostr.Tag{"rtt", "read", openConnReadString },
-					},
-					Content: "",
+				// Publish to Nostr stats/kind 30166
+				ev := nostr.Event{
+					PubKey:    pub,
+					CreatedAt: nostr.Timestamp(whatTime.Unix()),
+					Kind:      30166,
+					Tags:      newTags,
+					Content:   "",
 				}
 				ev.Sign(iConfig.PrivateKey)
 				publishEv(ev, publishRelays)
