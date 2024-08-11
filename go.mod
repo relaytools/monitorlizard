@@ -4,6 +4,7 @@ go 1.22.4
 
 require (
 	github.com/influxdata/influxdb-client-go/v2 v2.13.0
+	github.com/mmcloughlin/geohash v0.10.0
 	github.com/nbd-wtf/go-nostr v0.33.0
 	github.com/relaytools/go-wsstat v0.0.0-20240624222222-831694dc7443
 	github.com/spf13/viper v1.19.0
@@ -29,7 +30,6 @@ require (
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
-	github.com/mmcloughlin/geohash v0.10.0 // indirect
 	github.com/oapi-codegen/runtime v1.0.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.2 // indirect
 	github.com/puzpuzpuz/xsync/v3 v3.0.2 // indirect
