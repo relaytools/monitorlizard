@@ -195,31 +195,36 @@ func main() {
 			fmt.Printf("published monitor relayList kind:10002 to %v\n", publishRelays)
 		}
 
-		monitorGeo := geohash.EncodeWithPrecision(iConfig.MonitorLatitude, iConfig.MonitorLongitude, 9)
-		fmt.Println("monitor geohash was: ", monitorGeo)
-
 		// Publish to Nostr
 		// 10166 - Monitor Profile
+		profileTags := nostr.Tags{
+			nostr.Tag{"url"},
+			nostr.Tag{"frequency", useFrequencySecondsString},
+			nostr.Tag{"o", pub},
+			nostr.Tag{"k", "30066"},
+			nostr.Tag{"c", "open"},
+			nostr.Tag{"c", "read"},
+			nostr.Tag{"timeout", "5000", "open"},
+			nostr.Tag{"timeout", "15000", "read"},
+			nostr.Tag{"timeout", "15000", "write"},
+			nostr.Tag{"G", iConfig.MonitorCountryCode, "countryCode"},
+		}
+
+		// for every geo tag, encode all lesser precisions also
+		monitorGeo := geohash.EncodeWithPrecision(iConfig.MonitorLatitude, iConfig.MonitorLongitude, 9)
+		fmt.Println("monitor geohash was: ", monitorGeo)
+		for i := 1; i < 9; i++ {
+			profileTags = profileTags.AppendUnique(nostr.Tag{"g", monitorGeo[:i]})
+		}
+
 		ev := nostr.Event{
 			PubKey:    pub,
 			CreatedAt: nostr.Timestamp(time.Now().Unix()),
 			Kind:      10166,
-			Tags: nostr.Tags{
-
-				nostr.Tag{"url"},
-				nostr.Tag{"frequency", useFrequencySecondsString},
-				nostr.Tag{"o", pub},
-				nostr.Tag{"k", "30066"},
-				nostr.Tag{"c", "open"},
-				nostr.Tag{"c", "read"},
-				nostr.Tag{"timeout", "5000", "open"},
-				nostr.Tag{"timeout", "15000", "read"},
-				nostr.Tag{"timeout", "15000", "write"},
-				nostr.Tag{"G", iConfig.MonitorCountryCode, "countryCode"},
-				nostr.Tag{"g", monitorGeo},
-			},
-			Content: "",
+			Tags:      profileTags,
+			Content:   "",
 		}
+
 		ev.Sign(iConfig.PrivateKey)
 		err = publishEv(ev, publishRelays)
 		if err != nil {
@@ -321,13 +326,18 @@ func main() {
 				newTags = newTags.AppendUnique(t)
 			}
 
-			fmt.Printf("tags were %v\n", theseTags)
 			newTags = newTags.AppendUnique(nostr.Tag{"d", url.String()})
-			newTags = newTags.AppendUnique(nostr.Tag{"g", geohash.EncodeWithPrecision(iConfig.RelayLatitude, iConfig.RelayLongitude, 9)})
+
+			// for every geo tag, encode all lesser precisions also
+			fullGeo := geohash.EncodeWithPrecision(iConfig.RelayLatitude, iConfig.RelayLongitude, 9)
+			for i := 1; i < 9; i++ {
+				newTags = newTags.AppendUnique(nostr.Tag{"g", fullGeo[:i]})
+			}
+
 			newTags = newTags.AppendUnique(nostr.Tag{"rtt-open", openConnString})
 			newTags = newTags.AppendUnique(nostr.Tag{"rtt-read", openConnReadString})
 			newTags = newTags.AppendUnique(nostr.Tag{"other", "network", "clearnet"})
-			fmt.Println("newTags: ", newTags)
+
 			if iConfig.Publish {
 				// Publish to Nostr stats/kind 30166
 				ev := nostr.Event{
