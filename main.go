@@ -292,6 +292,7 @@ func main() {
 			result, _, err := wsstat.MeasureLatency(url, msg, http.Header{})
 			if err != nil {
 				fmt.Println("ERROR OCCURRED: ", err)
+				continue
 			}
 
 			fmt.Printf("Collecting data for %s at %s. total latency %dms\n", url, t, result.TotalTime.Milliseconds())
