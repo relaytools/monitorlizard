@@ -32,6 +32,17 @@ MONITOR_COUNTRY_CODE=US
 MONITOR_ABOUT=Relay Monitor new Lizard
 # Frequency to run and publish checks.
 MONITOR_FREQUENCY=60
+# optional specify one or more relays (or use command line option)
+RELAY_URLS=wss://myrelay1.com,wss://myrelay2.com
+
+# monitorlizard geoencodes this for you and encodes to a low
+# precision (general area or country)
+# the lat, long of the monitor location
+MONITOR_LATITUDE=47.620564
+MONITOR_LONGITUDE=-122.350616
+# this is the lat,long of the relay(s) location
+RELAY_LATITUDE=43.000000
+RELAY_LONGITUDE=-75.000000
 ```
 
 Run it!
