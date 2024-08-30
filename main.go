@@ -40,7 +40,7 @@ type MonitorConfig struct {
 	MonitorAbout          string  `mapstructure:"MONITOR_ABOUT"`
 	MonitorPicture        string  `mapstructure:"MONITOR_PICTURE"`
 
-	RelayUrl       string  `mapstructure:"RELAY_URL"`
+	RelayUrls      string  `mapstructure:"RELAY_URLS"`
 	RelayLatitude  float64 `mapstructure:"RELAY_LATITUDE"`
 	RelayLongitude float64 `mapstructure:"RELAY_LONGITUDE"`
 }
@@ -78,16 +78,7 @@ func publishEv(ev nostr.Event, urls []string) (err error) {
 }
 
 func main() {
-	args := os.Args
-	if len(args) < 2 {
-		log.Fatalf("Usage: go run main.go URL")
-	}
-	rawUrl := args[1]
 
-	url, err := url.Parse(rawUrl)
-	if err != nil {
-		log.Fatalf("Failed to parse URL: %v", err)
-	}
 	// Config loading
 	viper.AddConfigPath("/usr/local/etc")
 	viper.AddConfigPath("./")
@@ -103,6 +94,27 @@ func main() {
 	if err := viper.Unmarshal(&iConfig); err != nil {
 		fmt.Print("Warn: unable to decode monitorlizard config into struct\n", err)
 		os.Exit(1)
+	}
+
+	relayUrls := []string{}
+	if iConfig.RelayUrls != "" && strings.Contains(iConfig.RelayUrls, ",") {
+		relayUrls = strings.Split(iConfig.RelayUrls, ",")
+	} else if iConfig.RelayUrls != "" {
+		// single url
+		relayUrls = []string{iConfig.RelayUrls}
+	} else {
+		// command line arg
+		args := os.Args
+		if len(args) < 2 {
+			log.Printf("Usage: go run main.go URL, or specify RELAY_URLS in config")
+		}
+		rawUrl := args[1]
+
+		_, err := url.Parse(rawUrl)
+		if err != nil {
+			log.Fatalf("Failed to parse URL: %v", err)
+		}
+		relayUrls = []string{rawUrl}
 	}
 
 	// if a comma is detected in the iConfig.PublishRelayMetrics, split it into a slice
@@ -125,9 +137,6 @@ func main() {
 	if iConfig.MonitorFrequency != 0 {
 		useFrequency = time.Second * time.Duration(iConfig.MonitorFrequency)
 		useFrequencySecondsString = fmt.Sprintf("%d", iConfig.MonitorFrequency)
-		if err != nil {
-			fmt.Printf("Error: unable to parse duration %s\n", iConfig.MonitorFrequency)
-		}
 	}
 
 	pub, _ := nostr.GetPublicKey(iConfig.PrivateKey)
@@ -136,7 +145,6 @@ func main() {
 
 	var client influxdb2.Client
 	var writeAPI api.WriteAPI
-	theseTags := nostr.Tags{}
 
 	if influxEnabled {
 		// INFLUX INIT
@@ -234,124 +242,135 @@ func main() {
 		}
 	}
 
-	// fetch NIP11 document
-	nip11Info, err := nip11.Fetch(context.Background(), rawUrl)
-	gotNip11 := true
-	if err != nil {
-		fmt.Printf("Error fetching NIP11 document: %s\n", err)
-		gotNip11 = false
-	}
-
-	if gotNip11 {
-		for _, t := range nip11Info.SupportedNIPs {
-			theseTags = theseTags.AppendUnique(nostr.Tag{"N", fmt.Sprintf("%d", t)})
+	//FOR EACH RELAY
+	for _, u := range relayUrls {
+		// fetch NIP11 document
+		theseTags := nostr.Tags{}
+		nip11Info, err := nip11.Fetch(context.Background(), u)
+		gotNip11 := true
+		if err != nil {
+			fmt.Printf("Error fetching NIP11 document: %s\n", err)
+			gotNip11 = false
 		}
 
-		if nip11Info.Limitation.PaymentRequired {
-			theseTags = theseTags.AppendUnique(nostr.Tag{"R", "payment"})
-		} else {
-			theseTags = theseTags.AppendUnique(nostr.Tag{"R", "!payment"})
-		}
-
-		if nip11Info.Limitation.AuthRequired {
-			theseTags = theseTags.AppendUnique(nostr.Tag{"R", "auth"})
-		} else {
-			theseTags = theseTags.AppendUnique(nostr.Tag{"R", "!auth"})
-		}
-
-		// relay_countries (it's in nip11, could be used for geotags)
-		if len(nip11Info.RelayCountries) > 0 {
-			for _, c := range nip11Info.RelayCountries {
-				theseTags = theseTags.AppendUnique(nostr.Tag{"G", c})
-			}
-		}
-
-		// general tags
-		if len(nip11Info.Tags) > 0 {
-			for _, t := range nip11Info.Tags {
-				theseTags = theseTags.AppendUnique(nostr.Tag{"t", t})
-			}
-		}
-
-		theseTags = theseTags.AppendUnique(nostr.Tag{"d", url.String()})
-
-		// Todo:
-
-		//// don't need these but maybe
-		// accepted kinds?
-		// fees? probably don't need this
-		// restricted writes? that's new..
-		// language tags?
-
-	}
-	ticker := time.NewTicker(useFrequency)
-	go func() {
-		for t := range ticker.C {
-			msg := "[\"REQ\", \"1234abcdping\", {\"kinds\": [1], \"limit\": 1}]"
-			whatTime := time.Now()
-			result, _, err := wsstat.MeasureLatency(url, msg, http.Header{})
-			if err != nil {
-				fmt.Println("ERROR OCCURRED: ", err)
-				continue
+		if gotNip11 {
+			for _, t := range nip11Info.SupportedNIPs {
+				theseTags = theseTags.AppendUnique(nostr.Tag{"N", fmt.Sprintf("%d", t)})
 			}
 
-			fmt.Printf("Collecting data for %s at %s. total latency %dms\n", url, t, result.TotalTime.Milliseconds())
-
-			if influxEnabled {
-				point := influxdb2.NewPoint(
-					iConfig.InfluxMeasurement,
-					map[string]string{
-						"relay":   url.Hostname(),
-						"monitor": iConfig.MonitorName,
-					},
-					map[string]interface{}{
-						"dnslookup":     result.DNSLookup.Milliseconds(),
-						"tcpconnection": result.TCPConnection.Milliseconds(),
-						"tlshandshake":  result.TLSHandshake.Milliseconds(),
-						"wshandshake":   result.WSHandshake.Milliseconds(),
-						"wsrtt":         result.MessageRoundTrip.Milliseconds(),
-						"totaltime":     result.TotalTime.Milliseconds(),
-					},
-					whatTime,
-				)
-				// write asynchronously
-				writeAPI.WritePoint(point)
+			if nip11Info.Limitation.PaymentRequired {
+				theseTags = theseTags.AppendUnique(nostr.Tag{"R", "payment"})
+			} else {
+				theseTags = theseTags.AppendUnique(nostr.Tag{"R", "!payment"})
 			}
 
-			openConnMs := result.DNSLookup.Milliseconds() + result.TCPConnection.Milliseconds() + result.TLSHandshake.Milliseconds() + result.WSHandshake.Milliseconds()
-			openConnString := fmt.Sprintf("%d", openConnMs)
-			openConnReadString := fmt.Sprintf("%d", result.MessageRoundTrip.Milliseconds())
-
-			newTags := nostr.Tags{}
-			for _, t := range theseTags {
-				newTags = newTags.AppendUnique(t)
+			if nip11Info.Limitation.AuthRequired {
+				theseTags = theseTags.AppendUnique(nostr.Tag{"R", "auth"})
+			} else {
+				theseTags = theseTags.AppendUnique(nostr.Tag{"R", "!auth"})
 			}
 
-			newTags = newTags.AppendUnique(nostr.Tag{"d", url.String()})
-
-			// for every geo tag, encode all lesser precisions also
-			fullGeo := geohash.EncodeWithPrecision(iConfig.RelayLatitude, iConfig.RelayLongitude, 9)
-			for i := 1; i < 9; i++ {
-				newTags = newTags.AppendUnique(nostr.Tag{"g", fullGeo[:i]})
-			}
-
-			newTags = newTags.AppendUnique(nostr.Tag{"rtt-open", openConnString})
-			newTags = newTags.AppendUnique(nostr.Tag{"rtt-read", openConnReadString})
-			newTags = newTags.AppendUnique(nostr.Tag{"other", "network", "clearnet"})
-
-			if iConfig.Publish {
-				// Publish to Nostr stats/kind 30166
-				ev := nostr.Event{
-					PubKey:    pub,
-					CreatedAt: nostr.Timestamp(whatTime.Unix()),
-					Kind:      30166,
-					Tags:      newTags,
-					Content:   "",
+			// relay_countries (it's in nip11, could be used for geotags)
+			if len(nip11Info.RelayCountries) > 0 {
+				for _, c := range nip11Info.RelayCountries {
+					theseTags = theseTags.AppendUnique(nostr.Tag{"G", c})
 				}
-				ev.Sign(iConfig.PrivateKey)
-				publishEv(ev, publishRelays)
 			}
+
+			// general tags
+			if len(nip11Info.Tags) > 0 {
+				for _, t := range nip11Info.Tags {
+					theseTags = theseTags.AppendUnique(nostr.Tag{"t", t})
+				}
+			}
+
+			theseTags = theseTags.AppendUnique(nostr.Tag{"d", u})
+
+			// Todo:
+
+			//// don't need these but maybe
+			// accepted kinds?
+			// fees? probably don't need this
+			// restricted writes? that's new..
+			// language tags?
+
 		}
-	}()
+		// stagger the requests for multiple relays (random sleep?)
+
+		ticker := time.NewTicker(useFrequency)
+		go func() {
+			parsedUrl, err := url.Parse(u)
+			if err != nil {
+				fmt.Println("fatal error: unable to parse url: %s, %s", u, err)
+				os.Exit(1)
+			}
+			for t := range ticker.C {
+				msg := "[\"REQ\", \"1234abcdping\", {\"kinds\": [1], \"limit\": 1}]"
+				whatTime := time.Now()
+				result, _, err := wsstat.MeasureLatency(parsedUrl, msg, http.Header{})
+				if err != nil {
+					fmt.Println("ERROR OCCURRED: ", err)
+					continue
+				}
+
+				fmt.Printf("Collecting data for %s at %s. total latency %dms\n", u, t, result.TotalTime.Milliseconds())
+
+				if influxEnabled {
+					point := influxdb2.NewPoint(
+						iConfig.InfluxMeasurement,
+						map[string]string{
+							"relay":   u,
+							"monitor": iConfig.MonitorName,
+						},
+						map[string]interface{}{
+							"dnslookup":     result.DNSLookup.Milliseconds(),
+							"tcpconnection": result.TCPConnection.Milliseconds(),
+							"tlshandshake":  result.TLSHandshake.Milliseconds(),
+							"wshandshake":   result.WSHandshake.Milliseconds(),
+							"wsrtt":         result.MessageRoundTrip.Milliseconds(),
+							"totaltime":     result.TotalTime.Milliseconds(),
+						},
+						whatTime,
+					)
+					// write asynchronously
+					writeAPI.WritePoint(point)
+				}
+
+				openConnMs := result.DNSLookup.Milliseconds() + result.TCPConnection.Milliseconds() + result.TLSHandshake.Milliseconds() + result.WSHandshake.Milliseconds()
+				openConnString := fmt.Sprintf("%d", openConnMs)
+				openConnReadString := fmt.Sprintf("%d", result.MessageRoundTrip.Milliseconds())
+
+				newTags := nostr.Tags{}
+				for _, t := range theseTags {
+					newTags = newTags.AppendUnique(t)
+				}
+
+				newTags = newTags.AppendUnique(nostr.Tag{"d", u})
+
+				// for every geo tag, encode all lesser precisions also
+				fullGeo := geohash.EncodeWithPrecision(iConfig.RelayLatitude, iConfig.RelayLongitude, 9)
+				for i := 1; i < 9; i++ {
+					newTags = newTags.AppendUnique(nostr.Tag{"g", fullGeo[:i]})
+				}
+
+				newTags = newTags.AppendUnique(nostr.Tag{"rtt-open", openConnString})
+				newTags = newTags.AppendUnique(nostr.Tag{"rtt-read", openConnReadString})
+				newTags = newTags.AppendUnique(nostr.Tag{"other", "network", "clearnet"})
+
+				if iConfig.Publish {
+					// Publish to Nostr stats/kind 30166
+					ev := nostr.Event{
+						PubKey:    pub,
+						CreatedAt: nostr.Timestamp(whatTime.Unix()),
+						Kind:      30166,
+						Tags:      newTags,
+						Content:   "",
+					}
+					ev.Sign(iConfig.PrivateKey)
+					publishEv(ev, publishRelays)
+				}
+			}
+		}()
+	}
 	select {}
 }
