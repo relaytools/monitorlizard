@@ -186,15 +186,20 @@ func main() {
 		}
 
 		// 10002 - Monitor Relay List
+		relayTags := nostr.Tags{}
+		for _, t := range publishRelays {
+			fmt.Println(t)
+			relayTags = relayTags.AppendUnique(nostr.Tag{"r", t, "write"})
+		}
 		relayListEv := nostr.Event{
 			PubKey:    pub,
 			CreatedAt: nostr.Timestamp(time.Now().Unix()),
 			Kind:      10002,
-			Tags: nostr.Tags{
-				nostr.Tag{"r", iConfig.PublishRelayMetrics, "write"},
-			},
-			Content: "",
+			Tags:      relayTags,
+			Content:   "",
 		}
+		fmt.Println(publishRelays)
+		fmt.Println(relayTags)
 		relayListEv.Sign(iConfig.PrivateKey)
 		err = publishEv(relayListEv, publishRelays)
 		if err != nil {
