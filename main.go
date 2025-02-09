@@ -259,45 +259,48 @@ func main() {
 		}
 
 		if gotNip11 {
+
 			for _, t := range nip11Info.SupportedNIPs {
 				theseTags = theseTags.AppendUnique(nostr.Tag{"N", fmt.Sprintf("%d", t)})
 			}
 
-			if nip11Info.Limitation.PaymentRequired {
-				theseTags = theseTags.AppendUnique(nostr.Tag{"R", "payment"})
-			} else {
-				theseTags = theseTags.AppendUnique(nostr.Tag{"R", "!payment"})
-			}
+			/*
+					if nip11Info.Limitation.PaymentRequired {
+						theseTags = theseTags.AppendUnique(nostr.Tag{"R", "payment"})
+					} else {
+						theseTags = theseTags.AppendUnique(nostr.Tag{"R", "!payment"})
+					}
 
-			if nip11Info.Limitation.AuthRequired {
-				theseTags = theseTags.AppendUnique(nostr.Tag{"R", "auth"})
-			} else {
-				theseTags = theseTags.AppendUnique(nostr.Tag{"R", "!auth"})
-			}
-
-			// relay_countries (it's in nip11, could be used for geotags)
-			if len(nip11Info.RelayCountries) > 0 {
-				for _, c := range nip11Info.RelayCountries {
-					theseTags = theseTags.AppendUnique(nostr.Tag{"G", c})
+				if nip11Info.Limitation.AuthRequired {
+					theseTags = theseTags.AppendUnique(nostr.Tag{"R", "auth"})
+				} else {
+					theseTags = theseTags.AppendUnique(nostr.Tag{"R", "!auth"})
 				}
-			}
 
-			// general tags
-			if len(nip11Info.Tags) > 0 {
-				for _, t := range nip11Info.Tags {
-					theseTags = theseTags.AppendUnique(nostr.Tag{"t", t})
+				// relay_countries (it's in nip11, could be used for geotags)
+				if len(nip11Info.RelayCountries) > 0 {
+					for _, c := range nip11Info.RelayCountries {
+						theseTags = theseTags.AppendUnique(nostr.Tag{"G", c})
+					}
 				}
-			}
 
-			theseTags = theseTags.AppendUnique(nostr.Tag{"d", u})
+				// general tags
+				if len(nip11Info.Tags) > 0 {
+					for _, t := range nip11Info.Tags {
+						theseTags = theseTags.AppendUnique(nostr.Tag{"t", t})
+					}
+				}
 
-			// Todo:
+				theseTags = theseTags.AppendUnique(nostr.Tag{"d", u})
 
-			//// don't need these but maybe
-			// accepted kinds?
-			// fees? probably don't need this
-			// restricted writes? that's new..
-			// language tags?
+				// Todo:
+
+				//// don't need these but maybe
+				// accepted kinds?
+				// fees? probably don't need this
+				// restricted writes? that's new..
+				// language tags?
+			*/
 
 		}
 		// stagger the requests for multiple relays (random sleep?)
