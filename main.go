@@ -22,6 +22,31 @@ import (
 	"github.com/mmcloughlin/geohash"
 )
 
+// normalizeURL normalizes a URL by converting it to lowercase and ensuring consistent format
+func normalizeURL(rawURL string) (string, error) {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+
+	// Convert scheme and host to lowercase
+	parsedURL.Scheme = strings.ToLower(parsedURL.Scheme)
+	parsedURL.Host = strings.ToLower(parsedURL.Host)
+
+	// Remove default ports
+	if (parsedURL.Scheme == "ws" && strings.HasSuffix(parsedURL.Host, ":80")) ||
+		(parsedURL.Scheme == "wss" && strings.HasSuffix(parsedURL.Host, ":443")) {
+		parsedURL.Host = parsedURL.Host[:strings.LastIndex(parsedURL.Host, ":")]
+	}
+
+	// Ensure path ends with / if it's empty
+	if parsedURL.Path == "" {
+		parsedURL.Path = "/"
+	}
+
+	return parsedURL.String(), nil
+}
+
 type MonitorConfig struct {
 	InfluxUrl             string  `mapstructure:"INFLUXDB_URL"`
 	InfluxToken           string  `mapstructure:"INFLUXDB_TOKEN"`
@@ -57,7 +82,6 @@ func publishEv(ev nostr.Event, urls []string) (err error) {
 	lastError = nil
 	ctx := context.Background()
 	for _, url := range urls {
-		fmt.Println("publishing to -> ", url)
 		relay, err := nostr.RelayConnect(ctx, url)
 		if err != nil {
 			isError = true
@@ -249,6 +273,13 @@ func main() {
 
 	//FOR EACH RELAY
 	for _, u := range relayUrls {
+		// Normalize the URL for consistent d tag usage
+		normalizedURL, err := normalizeURL(u)
+		if err != nil {
+			fmt.Printf("Error normalizing URL %s: %s\n", u, err)
+			continue
+		}
+
 		// fetch NIP11 document
 		theseTags := nostr.Tags{}
 		nip11Info, err := nip11.Fetch(context.Background(), u)
@@ -261,7 +292,10 @@ func main() {
 		if gotNip11 {
 
 			for _, t := range nip11Info.SupportedNIPs {
-				theseTags = theseTags.AppendUnique(nostr.Tag{"N", fmt.Sprintf("%d", t)})
+				// Convert interface{} to int (SupportedNIPs contains float64 values)
+				if nipNum, ok := t.(float64); ok {
+					theseTags = theseTags.AppendUnique(nostr.Tag{"N", fmt.Sprintf("%d", int(nipNum))})
+				}
 			}
 
 			/*
@@ -306,10 +340,10 @@ func main() {
 		// stagger the requests for multiple relays (random sleep?)
 
 		ticker := time.NewTicker(useFrequency)
-		go func() {
-			parsedUrl, err := url.Parse(u)
+		go func(relayURL string, normalizedRelayURL string, relayTags nostr.Tags) {
+			parsedUrl, err := url.Parse(relayURL)
 			if err != nil {
-				fmt.Println("fatal error: unable to parse url: %s, %s", u, err)
+				fmt.Printf("fatal error: unable to parse url: %s, %s\n", relayURL, err)
 				os.Exit(1)
 			}
 			for t := range ticker.C {
@@ -321,13 +355,13 @@ func main() {
 					continue
 				}
 
-				fmt.Printf("Collecting data for %s at %s. total latency %dms\n", u, t, result.TotalTime.Milliseconds())
+				fmt.Printf("Collecting data for %s at %s. total latency %dms\n", relayURL, t, result.TotalTime.Milliseconds())
 
 				if influxEnabled {
 					point := influxdb2.NewPoint(
 						iConfig.InfluxMeasurement,
 						map[string]string{
-							"relay":   u,
+							"relay":   relayURL,
 							"monitor": iConfig.MonitorName,
 						},
 						map[string]interface{}{
@@ -349,11 +383,11 @@ func main() {
 				openConnReadString := fmt.Sprintf("%d", result.MessageRoundTrip.Milliseconds())
 
 				newTags := nostr.Tags{}
-				for _, t := range theseTags {
-					newTags = newTags.AppendUnique(t)
+				for _, tag := range relayTags {
+					newTags = newTags.AppendUnique(tag)
 				}
 
-				newTags = newTags.AppendUnique(nostr.Tag{"d", u})
+				newTags = newTags.AppendUnique(nostr.Tag{"d", normalizedRelayURL})
 
 				// for every geo tag, encode all lesser precisions also
 				fullGeo := geohash.EncodeWithPrecision(iConfig.RelayLatitude, iConfig.RelayLongitude, 9)
@@ -378,7 +412,7 @@ func main() {
 					publishEv(ev, publishRelays)
 				}
 			}
-		}()
+		}(u, normalizedURL, theseTags)
 	}
 	select {}
 }
