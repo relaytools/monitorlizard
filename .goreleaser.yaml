@@ -1,5 +1,5 @@
 version: 2
-project_name: monitorlizard
+project_name: relaymonitor
 # This is an example .goreleaser.yml file with some sensible defaults.
 # Make sure to check the documentation at https://goreleaser.com
 before:
@@ -39,6 +39,11 @@ archives:
     format_overrides:
       - goos: windows
         format: zip
+    files:
+      - README.md
+      - LICENSE
+      - relaymonitor.service
+      - example.relaymonitor.env
 checksum:
   name_template: "checksums.txt"
 snapshot:

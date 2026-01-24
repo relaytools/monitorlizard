@@ -1,1 +1,1 @@
-env GOARCH=arm64 GOOS=linux go build -o monitorlizard.arm64 main.go
+env GOARCH=arm64 GOOS=linux go build -o relaymonitor.arm64 main.go

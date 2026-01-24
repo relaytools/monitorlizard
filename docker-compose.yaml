@@ -1,0 +1,6 @@
+services:
+  relaymonitor:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - ./.relaymonitor.env:/app/.relaymonitor.env:ro

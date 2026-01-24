@@ -3,17 +3,28 @@ relaymonitor
 relaymonitor.arm64
 *.exe
 
-# Config (contains private keys)
+# Config
 .relaymonitor.env
+
+# Git
+.git/
+.gitignore
 
 # Goreleaser
 dist/
+.goreleaser.yaml
+
+# GitHub
+.github/
+
+# Docker
+Dockerfile
+docker-compose.yaml
+.dockerignore
 
 # IDE
 .idea/
 .vscode/
-*.swp
-*.swo
 
 # OS
 .DS_Store
