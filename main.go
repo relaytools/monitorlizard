@@ -81,7 +81,10 @@ func publishEv(ev nostr.Event, urls []string) (err error) {
 	var lastError error
 	lastError = nil
 	ctx := context.Background()
-	for _, url := range urls {
+	for i, url := range urls {
+		if i > 0 {
+			time.Sleep(500 * time.Millisecond)
+		}
 		relay, err := nostr.RelayConnect(ctx, url)
 		if err != nil {
 			isError = true
@@ -208,6 +211,7 @@ func main() {
 		} else {
 			fmt.Printf("published monitor profile kind:0 to %v\n", publishRelays)
 		}
+		time.Sleep(1 * time.Second)
 
 		// 10002 - Monitor Relay List
 		relayTags := nostr.Tags{}
@@ -231,6 +235,7 @@ func main() {
 		} else {
 			fmt.Printf("published monitor relayList kind:10002 to %v\n", publishRelays)
 		}
+		time.Sleep(1 * time.Second)
 
 		// Publish to Nostr
 		// 10166 - Monitor Profile
@@ -272,7 +277,7 @@ func main() {
 	}
 
 	//FOR EACH RELAY
-	for _, u := range relayUrls {
+	for relayIdx, u := range relayUrls {
 		// Normalize the URL for consistent d tag usage
 		normalizedURL, err := normalizeURL(u)
 		if err != nil {
@@ -337,7 +342,10 @@ func main() {
 			*/
 
 		}
-		// stagger the requests for multiple relays (random sleep?)
+		// stagger the requests for multiple relays
+		if relayIdx > 0 {
+			time.Sleep(time.Duration(relayIdx) * 2 * time.Second)
+		}
 
 		ticker := time.NewTicker(useFrequency)
 		go func(relayURL string, normalizedRelayURL string, relayTags nostr.Tags) {
