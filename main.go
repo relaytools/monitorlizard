@@ -47,6 +47,25 @@ func normalizeURL(rawURL string) (string, error) {
 	return parsedURL.String(), nil
 }
 
+// ValidRelayTypes is the set of allowed T-tag values for kind 30166 relay type advertisement.
+var ValidRelayTypes = map[string]bool{
+	"PublicOutbox":   true,
+	"PublicInbox":    true,
+	"PrivateInbox":   true,
+	"PrivateStorage": true,
+	"Search":         true,
+	"Directory":      true,
+	"Community":      true,
+	"Algo":           true,
+	"Archival":       true,
+	"LocalCache":     true,
+	"Blob":           true,
+	"Broadcast":      true,
+	"Proxy":          true,
+	"Trusted":        true,
+	"Push":           true,
+}
+
 type MonitorConfig struct {
 	InfluxUrl             string  `mapstructure:"INFLUXDB_URL"`
 	InfluxToken           string  `mapstructure:"INFLUXDB_TOKEN"`
@@ -68,6 +87,23 @@ type MonitorConfig struct {
 	RelayUrls      string  `mapstructure:"RELAY_URLS"`
 	RelayLatitude  float64 `mapstructure:"RELAY_LATITUDE"`
 	RelayLongitude float64 `mapstructure:"RELAY_LONGITUDE"`
+}
+
+// RelayEntry holds a relay URL and its optional type, parsed from "url;type" notation.
+type RelayEntry struct {
+	URL  string
+	Type string
+}
+
+// parseRelayEntry splits a "url;type" string into a RelayEntry.
+// The type portion is optional; if absent, Type is empty.
+func parseRelayEntry(raw string) RelayEntry {
+	raw = strings.TrimSpace(raw)
+	parts := strings.SplitN(raw, ";", 2)
+	if len(parts) == 2 {
+		return RelayEntry{URL: strings.TrimSpace(parts[0]), Type: strings.TrimSpace(parts[1])}
+	}
+	return RelayEntry{URL: parts[0]}
 }
 
 type NostrProfile struct {
@@ -123,12 +159,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	relayUrls := []string{}
+	relayEntries := []RelayEntry{}
 	if iConfig.RelayUrls != "" && strings.Contains(iConfig.RelayUrls, ",") {
-		relayUrls = strings.Split(iConfig.RelayUrls, ",")
+		for _, raw := range strings.Split(iConfig.RelayUrls, ",") {
+			relayEntries = append(relayEntries, parseRelayEntry(raw))
+		}
 	} else if iConfig.RelayUrls != "" {
 		// single url
-		relayUrls = []string{iConfig.RelayUrls}
+		relayEntries = []RelayEntry{parseRelayEntry(iConfig.RelayUrls)}
 	} else {
 		// command line arg
 		args := os.Args
@@ -137,11 +175,11 @@ func main() {
 		}
 		rawUrl := args[1]
 
-		_, err := url.Parse(rawUrl)
+		_, err := url.Parse(strings.SplitN(rawUrl, ";", 2)[0])
 		if err != nil {
 			log.Fatalf("Failed to parse URL: %v", err)
 		}
-		relayUrls = []string{rawUrl}
+		relayEntries = []RelayEntry{parseRelayEntry(rawUrl)}
 	}
 
 	// if a comma is detected in the iConfig.PublishRelayMetrics, split it into a slice
@@ -277,7 +315,8 @@ func main() {
 	}
 
 	//FOR EACH RELAY
-	for relayIdx, u := range relayUrls {
+	for relayIdx, entry := range relayEntries {
+		u := entry.URL
 		// Normalize the URL for consistent d tag usage
 		normalizedURL, err := normalizeURL(u)
 		if err != nil {
@@ -347,19 +386,22 @@ func main() {
 			time.Sleep(time.Duration(relayIdx) * 2 * time.Second)
 		}
 
-		ticker := time.NewTicker(useFrequency)
-		go func(relayURL string, normalizedRelayURL string, relayTags nostr.Tags) {
+		go func(relayURL string, normalizedRelayURL string, relayTags nostr.Tags, relayType string) {
+			ticker := time.NewTicker(useFrequency)
+			defer ticker.Stop()
 			parsedUrl, err := url.Parse(relayURL)
 			if err != nil {
 				fmt.Printf("fatal error: unable to parse url: %s, %s\n", relayURL, err)
 				os.Exit(1)
 			}
-			for t := range ticker.C {
+			for {
+				t := time.Now()
 				msg := "[\"REQ\", \"1234abcdping\", {\"kinds\": [1], \"limit\": 1}]"
-				whatTime := time.Now()
+				whatTime := t
 				result, _, err := wsstat.MeasureLatency(parsedUrl, msg, http.Header{})
 				if err != nil {
 					fmt.Println("ERROR OCCURRED: ", err)
+					<-ticker.C
 					continue
 				}
 
@@ -407,6 +449,14 @@ func main() {
 				newTags = newTags.AppendUnique(nostr.Tag{"rtt-read", openConnReadString})
 				newTags = newTags.AppendUnique(nostr.Tag{"other", "network", "clearnet"})
 
+				if relayType != "" {
+					if ValidRelayTypes[relayType] {
+						newTags = newTags.AppendUnique(nostr.Tag{"T", relayType})
+					} else {
+						fmt.Printf("Warn: unknown relay type %q, skipping T tag\n", relayType)
+					}
+				}
+
 				if iConfig.Publish {
 					// Publish to Nostr stats/kind 30166
 					ev := nostr.Event{
@@ -419,8 +469,9 @@ func main() {
 					ev.Sign(iConfig.PrivateKey)
 					publishEv(ev, publishRelays)
 				}
+				<-ticker.C
 			}
-		}(u, normalizedURL, theseTags)
+		}(u, normalizedURL, theseTags, entry.Type)
 	}
 	select {}
 }
