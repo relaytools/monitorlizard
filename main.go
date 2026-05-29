@@ -64,6 +64,7 @@ var ValidRelayTypes = map[string]bool{
 	"Proxy":          true,
 	"Trusted":        true,
 	"Push":           true,
+	"Cache":          true,
 }
 
 type MonitorConfig struct {
