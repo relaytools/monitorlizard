@@ -90,21 +90,25 @@ type MonitorConfig struct {
 	RelayLongitude float64 `mapstructure:"RELAY_LONGITUDE"`
 }
 
-// RelayEntry holds a relay URL and its optional type, parsed from "url;type" notation.
+// RelayEntry holds a relay URL and its optional types, parsed from
+// "url;type1;type2" notation.
 type RelayEntry struct {
-	URL  string
-	Type string
+	URL   string
+	Types []string
 }
 
-// parseRelayEntry splits a "url;type" string into a RelayEntry.
-// The type portion is optional; if absent, Type is empty.
+// parseRelayEntry splits a "url;type1;type2" string into a RelayEntry.
+// The type portion is optional; if absent, Types is empty. Each type becomes
+// its own T tag on the kind 30166 event.
 func parseRelayEntry(raw string) RelayEntry {
-	raw = strings.TrimSpace(raw)
-	parts := strings.SplitN(raw, ";", 2)
-	if len(parts) == 2 {
-		return RelayEntry{URL: strings.TrimSpace(parts[0]), Type: strings.TrimSpace(parts[1])}
+	parts := strings.Split(strings.TrimSpace(raw), ";")
+	entry := RelayEntry{URL: strings.TrimSpace(parts[0])}
+	for _, t := range parts[1:] {
+		if t = strings.TrimSpace(t); t != "" {
+			entry.Types = append(entry.Types, t)
+		}
 	}
-	return RelayEntry{URL: parts[0]}
+	return entry
 }
 
 type NostrProfile struct {
@@ -126,6 +130,7 @@ func publishEv(ev nostr.Event, urls []string) (err error) {
 		if err != nil {
 			isError = true
 			lastError = err
+			continue
 		}
 
 		if err := relay.Publish(ctx, ev); err != nil {
@@ -282,7 +287,7 @@ func main() {
 			nostr.Tag{"url"},
 			nostr.Tag{"frequency", useFrequencySecondsString},
 			nostr.Tag{"o", pub},
-			nostr.Tag{"k", "30066"},
+			nostr.Tag{"k", "30166"},
 			nostr.Tag{"c", "open"},
 			nostr.Tag{"c", "read"},
 			nostr.Tag{"timeout", "5000", "open"},
@@ -387,7 +392,7 @@ func main() {
 			time.Sleep(time.Duration(relayIdx) * 2 * time.Second)
 		}
 
-		go func(relayURL string, normalizedRelayURL string, relayTags nostr.Tags, relayType string) {
+		go func(relayURL string, normalizedRelayURL string, relayTags nostr.Tags, relayTypes []string) {
 			ticker := time.NewTicker(useFrequency)
 			defer ticker.Stop()
 			parsedUrl, err := url.Parse(relayURL)
@@ -450,7 +455,7 @@ func main() {
 				newTags = newTags.AppendUnique(nostr.Tag{"rtt-read", openConnReadString})
 				newTags = newTags.AppendUnique(nostr.Tag{"other", "network", "clearnet"})
 
-				if relayType != "" {
+				for _, relayType := range relayTypes {
 					if ValidRelayTypes[relayType] {
 						newTags = newTags.AppendUnique(nostr.Tag{"T", relayType})
 					} else {
@@ -472,7 +477,7 @@ func main() {
 				}
 				<-ticker.C
 			}
-		}(u, normalizedURL, theseTags, entry.Type)
+		}(u, normalizedURL, theseTags, entry.Types)
 	}
 	select {}
 }

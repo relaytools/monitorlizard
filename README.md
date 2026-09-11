@@ -34,6 +34,8 @@ MONITOR_ABOUT=Relay Monitor new Lizard
 MONITOR_FREQUENCY=60
 # optional specify one or more relays (or use command line option)
 RELAY_URLS=wss://myrelay1.com,wss://myrelay2.com
+# optionally tag relay types (NIP-66 T tag); chain several with ;
+# RELAY_URLS=wss://myrelay1.com;PublicOutbox;Community,wss://myrelay2.com;Search
 
 # monitorlizard geoencodes this for you and encodes to a low
 # precision (general area or country)
